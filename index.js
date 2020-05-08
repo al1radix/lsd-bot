@@ -1,6 +1,5 @@
 const BotkitDiscord = require('botkit-discord');
 var util = require('util');
-var crypto = require("crypto");
 
 // Load general configuration settings
 var config = require('./config.json');
@@ -10,29 +9,40 @@ var discordConfig = require('./auth.json');
 var discordBot = BotkitDiscord(discordConfig);
 
 // MySQL
+/*
+ * Note: good article about the asynchronous nature of SQL requests in NodeJS: 
+ * https://codeburst.io/node-js-mysql-and-async-await-6fb25b01b628
+ * And a good one about pools and the right way to do it:
+ * https://evertpot.com/executing-a-mysql-query-in-nodejs/
+*/
 var mysqlConfig = require('./db.json');
 var mysql = null;
 var db = null;
 if (mysqlConfig.host) {
-    mysql = require('mysql');
-    db = mysql.createConnection(mysqlConfig);
-
-    // MySQL connexion
-    db.connect(function(err) {
-        if (err) {
-            console.log('Could not connect to database');
-            throw err;
-        }
-    });
+    const mysql = require('mysql2/promise');
+    db = mysql.createPool(mysqlConfig);
 } else {
     console.log('Running in no database mode');
 }
 
+// Load the LSD tools (users, roles, and sections management)
+var lsd_tools = require('./lsd-tools');
+
+// Cron jobs, see https://www.npmjs.com/package/node-cron
+// Format:
+// Seconds(0-59) Minutes(0-59) Hours(0-23) Day_of_Month(1-31) Months(0-11 for Jan-Dec) Day_of_Week(0-6 for Sun-Sat)
+if (!config.noCron) {
+    const cron = require("node-cron");
+    cron.schedule('0 0 13 * * *', () => {
+        var guild = discordBot.config.client.guilds.get(config.guild_id);
+        lsd_tools.reviewInvites(db, guild);
+    });    
+}
 
 /**
  * General listening entry point
  */
-discordBot.hears('^' + config.prefix + '.*','ambient',(bot, msg) => {
+discordBot.hears('^' + config.prefix + '.*', 'ambient', (bot, msg) => {
     if (msg.message.author.id == discordConfig.client.user.id) return; // Don't answer to ourselves
     var words = msg.message.content.substring(1).split(' ');
     if (words.length) {
@@ -40,8 +50,8 @@ discordBot.hears('^' + config.prefix + '.*','ambient',(bot, msg) => {
     }
 });
 
-discordBot.hears('hello','ambient',(bot, msg) => {
-	//console.log(util.inspect(bot));
+discordBot.hears('hello', 'ambient', (bot, msg) => {
+    //console.log(util.inspect(bot));
     //console.log(util.inspect(msg));
     if (msg.message.author.id == discordConfig.client.user.id) return; // Don't answer to ourselves
     processCommand('hello', 'ambient', bot, msg);
@@ -61,14 +71,14 @@ discordBot.hears('.*', 'direct_message', (bot, msg) => {
 });
 
 /**
- * Direct mention = mentionning the Bot during a private message to the Bot
+ * Direct mention = mentioning the Bot during a private message to the Bot
  */
 discordBot.hears('.*', 'direct_mention', (bot, msg) => {
-	//console.log(util.inspect(bot));
-	//console.log(util.inspect(msg));
+    //console.log(util.inspect(bot));
+    //console.log(util.inspect(msg));
     if (msg.message.author.id == discordConfig.client.user.id) return; // Don't answer to ourselves
     //bot.reply(msg.message, 'Received a direct_mention from ' + msg.message.author.username);
-    bot.reply(msg, "Salut " + msg.message.author.username + ", si tu as besoin d'aide, tape `"+config.prefix+"aide`");
+    bot.reply(msg, "Salut " + msg.message.author.username + ", si tu as besoin d'aide, tape `" + config.prefix + "aide`");
     /*
     bot.send({
     	text: "You're talking to me?",
@@ -84,7 +94,7 @@ discordBot.hears('.*', 'direct_mention', (bot, msg) => {
  */
 discordBot.hears('.*', 'mention', (bot, msg) => {
     if (msg.message.author.id == discordConfig.client.user.id) return; // Don't answer to ourselves
-    bot.reply(msg, msg.message.author.username + " parle de moi, c'est sympa ! Pour avoir de l'aide, tape `"+config.prefix+"aide`");
+    bot.reply(msg, msg.message.author.username + " parle de moi, c'est sympa ! Pour avoir de l'aide, tape `" + config.prefix + "aide`");
     //console.log('Was mentioned by ' + msg.message.author.username);
     //console.log("\n");
 });
@@ -107,21 +117,21 @@ discordBot.on('guildMemberAdd', (bot, members) => {
     if (members.length) {
         var member = members[0];
         member.send(`Salut ${member}, et bienvenue chez les Scorpions du Désert !` + "\n\n" +
-"La guilde Les Scorpions du Désert [LSD] est une guilde multi-jeux organisée en association \
+            "La guilde Les Scorpions du Désert [LSD] est une guilde multi-jeux organisée en association \
 loi 1901 dont le but est de soutenir ses joueurs autour d'un style de jeu unique : le jeu en groupe. \
 Active depuis 2002, Les Scorpions du Désert est l'une des guildes les plus réputées \
 et les plus actives du monde francophone." + "\n\n" +
-"En tant que simple Visiteur, tu ne verras pas grand-chose sur notre serveur Discord, à part le Bar. \
+            "En tant que simple Visiteur, tu ne verras pas grand-chose sur notre serveur Discord, à part le Bar. \
 Cela te permettra quand même de faire connaissance avec les membres et de leur parler. Un Scorpion peut alors t'inviter \
 ce qui te permettra d'accéder temporairement à tous les canaux des jeux et de jouer avec nous.\n\n" +
-"Si cette expérience te convainc et que tu as envie de devenir un ou une vrai(e) LSD, la procédure d'inscription \
-est très simple et se fait à l'aide de notre Bot. Il te suffit de taper `"+config.prefix+"inscription` dans un canal, et notre \
+            "Si cette expérience te convainc et que tu as envie de devenir un ou une vrai(e) LSD, la procédure d'inscription \
+est très simple et se fait à l'aide de notre Bot. Il te suffit de taper `"+ config.prefix + "inscription` dans un canal, et notre \
 Bot t'enverra un lien de connexion qui t'emmènera sur notre site de gestion de comptes, où tu pourras poser ta \
-candidature. Pour en savoir plus sur notre Bot, tape `"+config.prefix+"aide`\n\
+candidature. Pour en savoir plus sur notre Bot, tape `"+ config.prefix + "aide`\n\
 À bientôt !"
         );
     }
-  });
+});
 
 //--------------------------------------------------------------------------------
 //--------------------------------------------------------------------------------
@@ -133,17 +143,16 @@ candidature. Pour en savoir plus sur notre Bot, tape `"+config.prefix+"aide`\n\
  * @param {*} bot 
  * @param {*} msg 
  */
-function processCommand(command, context, bot, msg)
-{
-    switch(command) {
+function processCommand(command, context, bot, msg) {
+    switch (command) {
         case 'connexion':
         case 'connection':
         case 'connect':
         case 'login':
-            var key = buildConnectionKey(msg.message.author);
+            var key = lsd_tools.buildConnectionKey(db, msg.message.author);
             msg.message.author.send("Voici ton lien de connexion : " + buidLoginUrl(key)).then(
                 (newMessage) => {
-                    newMessage.delete(3600*1000); // Delete the message after one hour because the key will be expired by then
+                    newMessage.delete(3600 * 1000); // Delete the message after one hour because the key will be expired by then
                 }
             );
             console.log('Connection request from ' + msg.message.author.username + ' (' + msg.message.author.id + ')');
@@ -151,12 +160,23 @@ function processCommand(command, context, bot, msg)
                 msg.message.delete(4000);   // Remove the message to avoid poluting the channel
             }
             break;
+        case 'restart':
+            const guild = discordBot.config.client.guilds.get(config.guild_id);
+            if (guild) {
+                const member = guild.members.get(msg.message.author.id);
+                if (member && member.roles.some(role => { return role.name == 'Admin'; })) {
+                    msg.message.author.send("Redémarrage du Bot").then(() => {
+                        process.exit(1);
+                    });
+                }
+            }
+            break;
         case 'inscription':
         case 'signup':
-            var key = buildConnectionKey(msg.message.author);
+            var key = lsd_tools.buildConnectionKey(db, msg.message.author);
             msg.message.author.send("Voici ton lien pour t'inscrire : " + buidLoginUrl(key)).then(
                 (newMessage) => {
-                    newMessage.delete(3600*1000); // Delete the message after one hour because the key will be expired by then
+                    newMessage.delete(3600 * 1000); // Delete the message after one hour because the key will be expired by then
                 }
             );
             console.log('Inscription request from ' + msg.message.author.username + ' (' + msg.message.author.id + ')');
@@ -175,46 +195,58 @@ function processCommand(command, context, bot, msg)
         case 'sos':
             bot.reply(msg, helpMessage());
             break;
+        case 'inviter':
+        case 'invite':
+        case 'invitation':
+            var expiration = 7;     // Default delay is 7 days
+            var r = msg.message.content.match(/\s+(\d+)\s*$/);
+            if (r && r[1] && r[1] > 7 && r[1] < 365) {
+                expiration = r[1]
+            }
+            if (!msg.mentions.members || !msg.mentions.members.size) {
+                bot.reply(msg, "Erreur : vous devez mentionner au moins une personne à inviter");
+            }
+            msg.mentions.members.forEach(target => {
+                lsd_tools.invite(db, msg.guild, target, msg.member, expiration)
+                    .then(exp => {
+                        bot.reply(msg, "Invitation réussie de " + (target.nickname ? target.nickname : target.displayName));
+                        // Send a private message to the invited user, with explanations
+                        target.send("Félicitations, tu as désormais le statut d'Invité sur le serveur des Scorpions du Désert ! \
+Ceci te permet de circuler et de communiquer sur tous les canaux ouverts aux invités de notre serveur Discord.\n\
+Attention, tu redeviendras automatiquement simple visiteur au bout de " + exp + " jours, après quoi \
+il faudra qu'un Scorpion t'invite de nouveau.\n\
+Nous espérons que ton passage chez nous te plaîra et, qui saît ?, te décidera à nous rejoindre.\n\
+Bon séjour parmi nous ! - Les Scorpions du Désert");
+                    })
+                    .catch(err => {
+                        bot.reply(msg, err);
+                    });
+            });
+            break;
         default:
-            bot.reply(msg, "Commande inconnue, tape `"+config.prefix+"aide` pour la liste des commandes disponibles");
+            bot.reply(msg, "Commande inconnue, tape `" + config.prefix + "aide` pour la liste des commandes disponibles");
 
     }
 }
 
-function buildConnectionKey(user)
-{
-    if (!db) {
-        return '';
-    }
-    key = crypto.randomBytes(20).toString('hex');
-    //-- Insert the key in the database for later retrieval from the website
-    //   including its username, discriminator and avatar
-    db.query("INSERT INTO lsd_login SET login_key=?, created_on=unix_timestamp(), discord_id=?, discord_username=?, discord_discriminator=?, discord_avatar=?", 
-            [key, user.id, user.username, user.discriminator, user.avatar], 
-            function(err, results, fields) {
-        if (err) throw err;
-        console.log('Created key=' + key + ' for user_id=' + user.id);
-    });
-    //-- Done
-    return key;
-}
 
-function buidLoginUrl(key)
-{
+
+function buidLoginUrl(key) {
     return config.connection_url + '/' + key;
 }
 
 /**
  * Return help message
  */
-function helpMessage()
-{
-    return "Bonjour, je suis le Bot des Scorpions du Désert. Les commandes commencent par `"+config.prefix+"`\nVoici la liste : \n\
+function helpMessage() {
+    return "Bonjour, je suis le Bot des Scorpions du Désert. Les commandes commencent par `" + config.prefix + "`\nVoici la liste : \n\
       ```\n\
-"+config.prefix+"inscription          Poste ta candidature pour devenir un ou une LSD !\n\
-"+config.prefix+"connexion            Connecte-toi sur le site de gestion de ton compte LSD\n\
-"+config.prefix+"aide, "+config.prefix+"help, "+config.prefix+"sos    Obtenir cette aide\n\
-"+config.prefix+"lance nombre         Lance un dé entre 1 et 'nombre'. Par exemple pour un dé à 6 faces : "+config.prefix+"lance 6\n\
+"+ config.prefix + "inscription          Poste ta candidature pour devenir un ou une LSD !\n\
+"+ config.prefix + "connexion            Connecte-toi sur le site de gestion de ton compte LSD\n\
+"+ config.prefix + "inviter @Toto        Inviter un Visiteur pour 7 jours (Scorpions uniquement)\n\
+"+ config.prefix + "inviter @Toto 42     Inviter un Visiteur pour un nombre de jours précis (Officiers ou + uniquement)\n\
+"+ config.prefix + "aide, " + config.prefix + "help, " + config.prefix + "sos    Obtenir cette aide\n\
+"+ config.prefix + "lance nombre         Lance un dé entre 1 et 'nombre'. Par exemple pour un dé à 6 faces : " + config.prefix + "lance 6\n\
       ```";
 }
 
@@ -223,11 +255,10 @@ function helpMessage()
  * @param {*} bot 
  * @param {*} msg 
  */
-function lance(bot, msg)
-{
+function lance(bot, msg) {
     var r = msg.message.content.match(/lance\s+(\d+)/);
-    if (r && r[1] && r[1]>1) {
-        if (r[1]<=100000000) {
+    if (r && r[1] && r[1] > 1) {
+        if (r[1] <= 100000000) {
             var result = 1 + Math.floor(Math.random() * Math.floor(r[1]));
             bot.reply(msg.message, 'OK, je lance un dé à ' + r[1] + ' faces ! Résultat : ' + result);
         }
